@@ -1,0 +1,19 @@
+plugins {
+    id 'java'
+}
+
+group 'com.migrator'
+version '1.0'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation group: 'commons-dbutils', name: 'commons-dbutils', version: '1.7'
+    implementation group: 'mysql', name: 'mysql-connector-java', version: '5.1.49'
+    implementation group: 'com.alibaba', name: 'druid', version: '1.2.6'
+    implementation group: 'org.projectlombok', name:'lombok', version:'1.18.18'
+    annotationProcessor 'org.projectlombok:lombok:1.18.18'
+    implementation group: 'com.fasterxml.jackson.core', name:'jackson-databind', version:'2.12.2'
+}

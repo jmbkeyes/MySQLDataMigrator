@@ -1,9 +1,12 @@
 package com.migrator.core.utils;
 
 import java.io.ByteArrayOutputStream;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.Properties;
 
 public class FileUtil {
@@ -14,8 +17,14 @@ public class FileUtil {
     public static Properties loadProperties(String filePath) throws IOException {
         ClassLoader classLoader = FileUtil.getDefaultClassLoader();
         Properties properties = new Properties();
-        InputStream is = classLoader.getResourceAsStream(filePath);
+        InputStream is = null;
+        if(Files.exists(Paths.get(filePath))){
+            is = new FileInputStream(filePath);
+        }else {
+            is = classLoader.getResourceAsStream(filePath);
+        }
         properties.load(is);
+        is.close();
         return properties;
     }
 

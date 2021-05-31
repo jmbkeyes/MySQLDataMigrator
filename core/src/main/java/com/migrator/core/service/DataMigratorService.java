@@ -18,22 +18,27 @@ import java.io.IOException;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.stream.Collectors;
 
 public class DataMigratorService {
     private List<Table> tables;
     private List<Column> columns;
+    private List<Column> targetColumns;
+    private List<Table> targetTables;
     private List<Key> keys;
     /**33727 4t
      * 32066 8t
      * 21707 12t
      * 23555 16t
      */
-    private static ExecutorService threadPool = Executors.newFixedThreadPool(12);
+    private static ExecutorService threadPool = Executors.newFixedThreadPool(MigratorConfig.getMigratedThreadCount());
+    private final Semaphore semaphore = new Semaphore(1000);
 
     private SchemaDAO schemaDAO;
     public DataMigratorService(SchemaDAO schemaDAO){
@@ -46,12 +51,26 @@ public class DataMigratorService {
         tables = schemaDAO.getTables(connection, database);
         columns = schemaDAO.getColumns(connection, database);
         keys = schemaDAO.getKeys(connection, database);
+
+        Connection targetConnection = MigratorDataSource.getInstance().getTargetDataSource().getConnection();
+        String targetDatabase = MigratorConfig.getTargetDbName();
+        targetTables = schemaDAO.getTables(connection, targetDatabase);
+        targetColumns = schemaDAO.getColumns(connection, targetDatabase);
+
         if(!connection.isClosed()){
             connection.close();
+        }
+        if(!targetConnection.isClosed()){
+            targetConnection.close();
         }
 
         long start = System.currentTimeMillis();
         List<String> tables = MigratorConfig.getMigrateTables();
+        List<String> verifyTableDiffResult = verifyTableDiffs(tables);
+        if(verifyTableDiffResult.size()>0){
+            throw new RuntimeException(String.format("table(%s)'s definitions are not same.", StringUtil.join(verifyTableDiffResult, Consts.COMMA_DELIMITER)));
+        }
+
         for(String table: tables) {
             migrateTable(table);
         }
@@ -59,6 +78,34 @@ public class DataMigratorService {
         while(!threadPool.isTerminated()){
         }
         System.out.println(String.format("耗时%sms", System.currentTimeMillis() - start));
+    }
+
+    private List<String> verifyTableDiffs(List<String> migratedTables) {
+        List<String> diffs = new ArrayList<>();
+        for(String table :migratedTables){
+            Optional<Table> source = tables.stream().filter(t->t.getName().equals(table)).findFirst();
+            Optional<Table> target = targetTables.stream().filter(t->t.getName().equals(table)).findFirst();
+            if(!source.isPresent() || !target.isPresent()){
+                diffs.add(table);
+            }else{
+                List<Column> sourceCols = columns.stream().filter(t->t.getTableName().equals(table)).collect(Collectors.toList());
+                List<Column> targetCols = targetColumns.stream().filter(t->t.getTableName().equals(table)).collect(Collectors.toList());
+                if(sourceCols.size() != targetCols.size()){
+                    diffs.add(table);
+                }else{
+                    sourceCols.sort(Comparator.comparing(Column::getName));
+                    targetCols.sort(Comparator.comparing(Column::getName));
+                    for(int i = 0, len = sourceCols.size(); i < len; i++){
+                        if(!sourceCols.get(i).equals(targetCols.get(i))){
+                            diffs.add(table);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        return diffs;
     }
 
     private void migrateTable(String tableName) throws SQLException {
@@ -94,23 +141,27 @@ public class DataMigratorService {
         String selectSQL = String.format("SELECT %s FROM %s where %s >=? and %s<? %s", StringUtil.join(colNames, Consts.COMMA_DELIMITER), tableName, key.get().getColumnName(), key.get().getColumnName(), ObjectUtils.isEmpty(whereCondition) ? Consts.EMPTY_STR: (" AND " + whereCondition));
         String insertSQL = String.format("INSERT INTO %s (%s) VALUES(%s)", tableName, StringUtil.join(colNames, Consts.COMMA_DELIMITER), StringUtil.repeatStr("?", colNames.size(), Consts.COMMA_DELIMITER));
 
-        try {
-            for(MigrationSubTask subTask: subTasks){
-                threadPool.execute(new Runnable(){
+        for(MigrationSubTask subTask: subTasks){
+            try {
+                semaphore.acquire();
+                threadPool.submit(new Runnable() {
                     @SneakyThrows
                     @Override
                     public void run() {
                         System.out.println(subTask.getMinId() + "," + subTask.getMaxId());
-                        try(Connection sourceConnection = MigratorDataSource.getInstance().getSourceDataSource().getConnection();
-                            Connection targetConnection = MigratorDataSource.getInstance().getTargetDataSource().getConnection();) {
-                            List<Object[]> objects = DbUtil.getSourceTableData(sourceConnection, selectSQL, new Object[]{subTask.getMinId(), subTask.getMaxId()});
-                            DbUtil.batchInsert(targetConnection, insertSQL, objects);
+                        try (Connection sourceConnection = MigratorDataSource.getInstance().getSourceDataSource().getConnection();
+                             Connection targetConnection = MigratorDataSource.getInstance().getTargetDataSource().getConnection();) {
+                             List<Object[]> objects = DbUtil.getSourceTableData(sourceConnection, selectSQL, new Object[]{subTask.getMinId(), subTask.getMaxId()});
+                             DbUtil.batchInsert(targetConnection, insertSQL, objects);
+                        } finally {
+                            semaphore.release();
                         }
                     }
                 });
+            }catch (Exception ex){
+                semaphore.release();
+                System.out.println(ex);
             }
-        }catch (Exception ex){
-            System.out.println(ex);
         }
     }
 

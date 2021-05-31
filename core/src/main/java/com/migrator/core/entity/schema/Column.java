@@ -2,8 +2,11 @@ package com.migrator.core.entity.schema;
 
 import com.migrator.core.Consts;
 import com.migrator.core.entity.schema.annotations.DbProperty;
+import com.migrator.core.utils.ObjectUtils;
 import lombok.Getter;
 import lombok.Setter;
+
+import java.util.Objects;
 
 @Getter
 @Setter
@@ -55,5 +58,35 @@ public class Column {
         }else{
             return name;
         }
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof Column)) {
+            return false;
+        }
+        Column column = (Column) o;
+
+        return Objects.equals(getTableName(), column.getTableName()) &&
+                Objects.equals(getName(), column.getName()) &&
+                ((ObjectUtils.isEmpty(getDefaultValue()) && ObjectUtils.isEmpty(column.getDefaultValue()))
+                        || Objects.equals(getDefaultValue(), column.getDefaultValue())) &&
+                Objects.equals(getNullable(), column.getNullable()) &&
+                Objects.equals(getType(), column.getType()) &&
+                Objects.equals(getMaxLength(), column.getMaxLength()) &&
+                Objects.equals(getNumericPrecision(), column.getNumericPrecision()) &&
+                Objects.equals(getNumericScale(), column.getNumericScale()) &&
+                Objects.equals(getDatetimePrecision(), column.getDatetimePrecision()) &&
+                Objects.equals(getExtra(), column.getExtra()) &&
+                Objects.equals(getComment(), column.getComment()) &&
+                Objects.equals(getGenerationExpression(), column.getGenerationExpression());
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(getTableName(), getName(), getDefaultValue(), getNullable(), getType(), getMaxLength(), getNumericPrecision(), getNumericScale(), getDatetimePrecision(), getCharacter(), getCollation(), getColumnType(), getExtra(), getComment(), getGenerationExpression());
     }
 }
